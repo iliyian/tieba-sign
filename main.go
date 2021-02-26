@@ -1,16 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"github.com/PuerkitoBio/goquery"
+	"github.com/djimenez/iconv-go"
+	"github.com/imroc/req"
 	"io/ioutil"
 	"log"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
-	"github.com/PuerkitoBio/goquery"
-	"github.com/imroc/req"
-	"github.com/djimenez/iconv-go"
 )
 
 var header req.Header = req.Header{
@@ -30,42 +29,45 @@ type signResp struct {
 	No   int                         `json:"no"`
 }
 
-func sign(abs string, kw string) {
+func sign(abs string, kw string, idx int, sum int) {
 	param := req.Param{
 		"ie":  "utf-8",
 		"kw":  kw,
 		"abs": abs,
 	}
-	r, err := req.Post("http://tieba.baidu.com", param, header)
+	r, err := req.Post("http://tieba.baidu.com/sign/add", param, header)
 	if err != nil {
 		log.Println(err)
 	}
 
+	// 分析尝试签到的结果
 	var signresp signResp
 	r.ToJSON(&signresp)
 
 	if signresp.No == 0 {
-		fmt.Printf("%s signed success.\n", kw)
+		log.Printf("[%d/%d] %s signed success.\n", idx+1, sum, kw)
 	} else {
-		fmt.Printf("%s signed fail.\n", kw)
+		log.Printf("[%d/%d] %s signed fail.\n", idx+1, sum, kw)
 		log.Println(signresp.Err)
 	}
+
 }
 
 // 获取某个贴吧的abs,即签到验证信息
 func getAbs(kw string) string {
 	param := req.Param{
-		"kw": kw,
+		"kw": url.QueryEscape(kw),
 	}
-	r, err := req.Get("http://tieba.baidu.com", param, header)
+	r, err := req.Get("http://tieba.baidu.com/f", param, header)
 	if err != nil {
 		log.Println(err)
 	}
 
 	html, _ := r.ToBytes()
 
+	// 用正则来获取abs，golang不自持perl的高级re语法，所以得两次
 	re0 := regexp.MustCompile(`'tbs': ".*"`)
-	re1 := regexp.MustCompile(`(\d|\w)+{4,}`)
+	re1 := regexp.MustCompile(`(\d|\w){4,}`)
 
 	temp0 := re0.Find(html)
 	abs := re1.Find(temp0)
@@ -93,6 +95,7 @@ func getDom(r *req.Resp) goquery.Document {
 	return *dom
 }
 
+// 获取贴吧列表时，获取最后一页的页码
 func getPn() int {
 	r, err := req.Get("http://tieba.baidu.com/f/like/mylike", header)
 	if err != nil {
@@ -101,9 +104,10 @@ func getPn() int {
 
 	dom := getDom(r)
 
+	// 分析href里的页码
 	uri, ex := dom.Find("#j_pagebar > div > a:last-child").Attr("href")
 	if ex == false {
-		fmt.Println("Not exist.")
+		log.Println("Not exist.")
 	}
 
 	u, err := url.Parse(uri)
@@ -111,6 +115,7 @@ func getPn() int {
 		log.Println(err)
 	}
 
+	// 获取查询字符串，即末页页码
 	pn, err := strconv.Atoi(u.Query().Get("pn"))
 	if err != nil {
 		log.Println(err)
@@ -119,6 +124,7 @@ func getPn() int {
 	return pn
 }
 
+// 获取贴吧列表的kw，即贴吧名
 func getForums(pn int) []string {
 	var forums []string
 
@@ -143,20 +149,41 @@ func getForums(pn int) []string {
 	return forums
 }
 
+// 装载cookie，还不能直接弄密码登录，水平不足
 func loadCookie() {
 	cookie, err := ioutil.ReadFile("cookie.txt")
 	if err != nil {
 		log.Println(err)
 	}
 
+	if len(cookie) == 0 {
+		panic("Please fill cookie.txt")
+	}
+
 	// 避免cookie末尾的换行
-  cookiestr := string(cookie)
-  cookiestr = strings.ReplaceAll(string(cookiestr), "\r\n", "")
+	cookiestr := string(cookie)
+	cookiestr = strings.ReplaceAll(string(cookiestr), "\r\n", "")
 	header["Cookie"] = cookiestr
 }
 
 func main() {
 	loadCookie()
 	forums := getForums(getPn())
-	fmt.Println(forums)
+	// fmt.Println(forums)
+
+	log.Printf("Scanned %d forums.", len(forums))
+	log.Println(forums)
+
+	// 也许可以用goroutimes来并发签到
+	rest := len(forums)
+
+	// 一个一个签到
+	for i, forum := range forums {
+		abs := getAbs(forum)
+		log.Printf("Abs of %s is %s\n", forum, abs)
+		sign(abs, forum, i, rest)
+		log.Println()
+	}
+
+	log.Println("Sign end.")
 }
