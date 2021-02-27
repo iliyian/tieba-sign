@@ -1,15 +1,17 @@
 package main
 
 import (
-	"github.com/PuerkitoBio/goquery"
-	"github.com/djimenez/iconv-go"
-	"github.com/imroc/req"
 	"io/ioutil"
 	"log"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/djimenez/iconv-go"
+	"github.com/imroc/req"
 )
 
 var header req.Header = req.Header{
@@ -29,7 +31,7 @@ type signResp struct {
 	No   int                         `json:"no"`
 }
 
-func sign(abs string, kw string, idx int, sum int) {
+func signForum(abs string, kw string, idx int, sum int) {
 	param := req.Param{
 		"ie":  "utf-8",
 		"kw":  kw,
@@ -150,12 +152,7 @@ func getForums(pn int) []string {
 }
 
 // 装载cookie，还不能直接弄密码登录，水平不足
-func loadCookie() {
-	cookie, err := ioutil.ReadFile("cookie.txt")
-	if err != nil {
-		log.Println(err)
-	}
-
+func loadCookie(cookie []byte) {
 	if len(cookie) == 0 {
 		panic("Please fill cookie.txt")
 	}
@@ -166,8 +163,9 @@ func loadCookie() {
 	header["Cookie"] = cookiestr
 }
 
-func main() {
-	loadCookie()
+func signAllForums(cookie []byte) {
+	loadCookie(cookie)
+	
 	forums := getForums(getPn())
 	// fmt.Println(forums)
 
@@ -181,9 +179,28 @@ func main() {
 	for i, forum := range forums {
 		abs := getAbs(forum)
 		log.Printf("Abs of %s is %s\n", forum, abs)
-		sign(abs, forum, i, rest)
+		signForum(abs, forum, i, rest)
 		log.Println()
 	}
 
 	log.Println("Sign end.")
+}
+
+func main() {
+	cookie, err := ioutil.ReadFile("cookie.txt")
+	if err != nil {
+		log.Println(err)
+	}
+	for {
+		log.Println("Now hour is", time.Now().Hour())
+
+		if time.Now().Hour() == 9 {
+			log.Println("Start to sign.")
+			signAllForums(cookie)
+		} else {
+			log.Println("No need sign. Sleep for 1 hour.")
+		}
+
+		time.Sleep(time.Hour)
+	}
 }
